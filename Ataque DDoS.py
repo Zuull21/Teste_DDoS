@@ -4,6 +4,7 @@ import time
 
 # Dicionário para rastrear as conexões ativas
 conexoes_ativas = defaultdict(int)
+ips_atacantes = set()
 
 # Limite inicial de pacotes por segundo para identificar tráfego anormal
 limite_inicial = 100
@@ -16,7 +17,7 @@ tempo_de_observacao = 60
 
 # Inicie a captura de pacotes na interface de rede.
 def packet_callback(packet):
-    global limite_pacotes_por_segundo, conexoes_ativas
+    global limite_pacotes_por_segundo, conexoes_ativas, ips_atacantes
     pacotes_recebidos = time.time()
     
     # Remove conexões inativas
@@ -32,9 +33,16 @@ def packet_callback(packet):
     # Calcula o limite de pacotes por segundo com base no número de conexões ativas
     limite_pacotes_por_segundo = int(limite_inicial * (fator_crescimento ** num_conexoes_ativas))
     
-# Inicie a captura de pacotes na interface de rede.
-sniff(iface='Intel(R) Wireless-AC 9462', prn=packet_callback)
+    # Verifica se o tráfego excede o limite definido
+    if num_conexoes_ativas > limite_pacotes_por_segundo:
+        print("Ataque DDoS detectado! Tráfego anormal.")
+        
+        # Adiciona o IP atacante à lista
+        ips_atacantes.add(ip_origem)
 
-# Verifique se o tráfego excede o limite definido.
-if num_conexoes_ativas > limite_pacotes_por_segundo:
-    print("Ataque DDoS detectado! Tráfego anormal.")
+# Inicie a captura de pacotes na interface de rede.
+sniff(iface='Adaptador de Rede sem Fio Wi-Fi', prn=packet_callback)
+
+# Exibe o número total de ataques e IPs atacantes
+print(f"Total de Ataques DDoS: {len(ips_atacantes)}")
+print(f"Ips Atacantes: {', '.join(ips_atacantes)}")
