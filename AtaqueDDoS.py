@@ -1,48 +1,37 @@
-from scapy.all import sniff
-from collections import defaultdict
-import time
+from scapy.all import sniff, IP
 
-# Dicionário para rastrear as conexões ativas
-conexoes_ativas = defaultdict(int)
-ips_atacantes = set()
+class DDoSAnalyzer:
+    def __init__(self):
+        self.attack_count = 0
+        self.attackers = set()
 
-# Limite inicial de pacotes por segundo para identificar tráfego anormal
-limite_inicial = 100
+    def packet_callback(self, packet):
+        if IP in packet:
+            src_ip = packet[IP].src
+            dst_ip = packet[IP].dst
 
-# Fator de crescimento do limite
-fator_crescimento = 1.2
+            # Atualizar contadores
+            self.attack_count += 1
+            self.attackers.add(src_ip)
 
-# Tempo de observação em segundos
-tempo_de_observacao = 60
+            # Exibir informações
+            print(f"Packet from {src_ip} to {dst_ip}")
 
-# Inicie a captura de pacotes na interface de rede.
-def packet_callback(packet):
-    global limite_pacotes_por_segundo, conexoes_ativas, ips_atacantes
-    pacotes_recebidos = time.time()
-    
-    # Remove conexões inativas
-    conexoes_ativas = {ip: last_seen for ip, last_seen in conexoes_ativas.items() if pacotes_recebidos - last_seen <= tempo_de_observacao}
-    
-    # Verifica o endereço IP de origem do pacote
-    ip_origem = packet[0][1].src
-    conexoes_ativas[ip_origem] = pacotes_recebidos
+    def start_sniffing(self, interface, filter_rule):
+        sniff(iface=interface, filter=filter_rule, prn=self.packet_callback, store=0)
 
-    # Calcula o número de conexões ativas
-    num_conexoes_ativas = len(conexoes_ativas)
-    
-    # Calcula o limite de pacotes por segundo com base no número de conexões ativas
-    limite_pacotes_por_segundo = int(limite_inicial * (fator_crescimento ** num_conexoes_ativas))
-    
-    # Verifica se o tráfego excede o limite definido
-    if num_conexoes_ativas > limite_pacotes_por_segundo:
-        print("Ataque DDoS detectado! Tráfego anormal.")
-        
-        # Adiciona o IP atacante à lista
-        ips_atacantes.add(ip_origem)
+# Substitua "enp0s3" pelo nome da sua interface de rede
+interface = "enp0s3"
 
-# Inicie a captura de pacotes na interface de rede.
-sniff(iface='enp0s3', prn=packet_callback)
+# Substitua "host 192.168.1.1" pelo seu próprio endereço IP ou pela máscara de rede desejada
+filter_rule = "host 192.168.1.1"
 
-# Exibe o número total de ataques e IPs atacantes
-print(f"Total de Ataques DDoS: {len(ips_atacantes)}")
-print(f"Ips Atacantes: {', '.join(ips_atacantes)}")
+# Criar instância do analisador
+analyzer = DDoSAnalyzer()
+
+# Iniciar a captura de pacotes
+analyzer.start_sniffing(interface, filter_rule)
+
+# Imprimir resultados
+print(f"Total de pacotes recebidos: {analyzer.attack_count}")
+print(f"IPs atacantes: {', '.join(analyzer.attackers)}")
