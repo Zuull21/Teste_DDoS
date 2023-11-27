@@ -6,7 +6,8 @@ import time
 class DDoSAnalyzer:
     def __init__(self):
         self.attack_count = 0
-        self.attackers = {}
+        self.all_attackers = set()
+        self.highlighted_attackers = set()
         self.threshold = 5000
         self.time_window = 60
         self.sniffing_thread = None
@@ -18,18 +19,20 @@ class DDoSAnalyzer:
             dst_ip = packet[IP].dst
 
             self.attack_count += 1
-            self.attackers[src_ip] = datetime.now()
+            self.all_attackers.add(src_ip)
 
             self.clean_counters()
 
             print(f"Packet from {src_ip} to {dst_ip}")
 
-            if src_ip in self.attackers and (datetime.now() - self.attackers[src_ip]).total_seconds() <= self.time_window:
-                print(f"Possible DDoS attack detected from {src_ip}! ({self.attackers[src_ip]} packets in {self.time_window} seconds)")
+            if src_ip in self.all_attackers and (datetime.now() - self.all_attackers[src_ip]).total_seconds() <= self.time_window:
+                print(f"Possible DDoS attack detected from {src_ip}! ({self.all_attackers[src_ip]} packets in {self.time_window} seconds)")
+                if self.all_attackers[src_ip] >= self.threshold:
+                    self.highlighted_attackers.add(src_ip)
 
     def clean_counters(self):
         current_time = datetime.now()
-        self.attackers = {ip: count_time for ip, count_time in self.attackers.items() if (current_time - count_time).total_seconds() <= self.time_window}
+        self.all_attackers = {ip: count_time for ip, count_time in self.all_attackers.items() if (current_time - count_time).total_seconds() <= self.time_window}
 
     def start_sniffing(self, interface, filter_rule):
         self.running = True
@@ -45,11 +48,21 @@ class DDoSAnalyzer:
         self.sniffing_thread = threading.Thread(target=self.start_sniffing, args=(interface, filter_rule))
         self.sniffing_thread.start()
 
-        # Agendar a parada após 1 minuto
-        threading.Timer(60, self.stop_sniffing).start()
+        # Agendar a parada após 1 minuto e reiniciar o monitoramento
+        threading.Timer(60, self.restart_sniffing, args=(interface, filter_rule)).start()
 
-    def get_attackers(self):
-        return [ip for ip, count_time in self.attackers.items() if (datetime.now() - count_time).total_seconds() <= self.time_window]
+    def restart_sniffing(self, interface, filter_rule):
+        self.stop_sniffing()
+        self.attack_count = 0
+        self.all_attackers = set()
+        self.highlighted_attackers = set()
+        self.start_dynamic_sniffing(interface, filter_rule)
+
+    def get_all_attackers(self):
+        return list(self.all_attackers)
+
+    def get_highlighted_attackers(self):
+        return list(self.highlighted_attackers)
 
 # Substitua "enp0s3" pelo nome da sua interface de rede
 interface = "enp0s3"
@@ -67,10 +80,11 @@ analyzer.start_dynamic_sniffing(interface, filter_rule)
 time.sleep(61)
 
 # Obter resultados
-attackers = analyzer.get_attackers()
+all_attackers = analyzer.get_all_attackers()
+highlighted_attackers = analyzer.get_highlighted_attackers()
 total_packets = analyzer.attack_count
 
 # Imprimir resultados
 print(f"Total de pacotes recebidos: {total_packets}")
-print(f"IPs atacantes (mais de {analyzer.threshold} pacotes em {analyzer.time_window} segundos): {', '.join(attackers)}")
-
+print(f"Todos os IPs atacantes: {', '.join(all_attackers)}")
+print(f"IPs destacados (mais de {analyzer.threshold} pacotes em {analyzer.time_window} segundos): {', '.join(highlighted_attackers)}")
