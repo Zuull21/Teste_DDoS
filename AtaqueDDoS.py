@@ -3,88 +3,85 @@ from datetime import datetime, timedelta
 import threading
 import time
 
-class DDoSAnalyzer:
+class TrafficAnalyzer:
     def __init__(self):
-        self.attack_count = 0
-        self.all_attackers = set()
-        self.highlighted_attackers = set()
-        self.threshold = 5000
-        self.time_window = 60
-        self.sniffing_thread = None
-        self.running = False
+        self.ip_traffic = {}  # Dicionário para armazenar o tráfego por IP
+        self.alert_threshold = 1.5  # 50% acima da média
+        self.running = True  # Variável para controlar a execução do script
+        self.trafego_normal = 0  # Variável para indicar tráfego normal
+        self.alteracoes_identificadas = 0  # Variável para indicar alterações no tráfego
 
     def packet_callback(self, packet):
         if IP in packet:
             src_ip = packet[IP].src
             dst_ip = packet[IP].dst
 
-            self.attack_count += 1
-            self.all_attackers.add(src_ip)
+            # Atualizar o tráfego por IP
+            self.ip_traffic[src_ip] = self.ip_traffic.get(src_ip, 0) + 1
 
-            self.clean_counters()
-
-            print(f"Packet from {src_ip} to {dst_ip}")
-
-            if src_ip in self.all_attackers and (datetime.now() - self.all_attackers[src_ip]).total_seconds() <= self.time_window:
-                print(f"Possible DDoS attack detected from {src_ip}! ({self.all_attackers[src_ip]} packets in {self.time_window} seconds)")
-                if self.all_attackers[src_ip] >= self.threshold:
-                    self.highlighted_attackers.add(src_ip)
-
-    def clean_counters(self):
+    def calculate_traffic_stats(self):
+        # Calcular a média de pacotes por minuto para cada IP
         current_time = datetime.now()
-        self.all_attackers = {ip: count_time for ip, count_time in self.all_attackers.items() if (current_time - count_time).total_seconds() <= self.time_window}
+        minute_ago = current_time - timedelta(minutes=1)
 
-    def start_sniffing(self, interface, filter_rule):
-        self.running = True
-        while self.running:
-            sniff(iface=interface, filter=filter_rule, prn=self.packet_callback, store=0, timeout=60)
+        for ip, count_time in list(self.ip_traffic.items()):
+            if count_time < minute_ago:
+                del self.ip_traffic[ip]
+            else:
+                self.ip_traffic[ip] = sum(1 for t in count_time if t >= minute_ago)
+
+    def check_for_alerts(self):
+        # Verificar se há alertas com base na média por minuto
+        alerts = []
+        for ip, count in self.ip_traffic.items():
+            average = count / 1  # 1 minuto para simplificar
+            if count > 0 and self.ip_traffic[ip] > self.alert_threshold * average:
+                alerts.append(ip)
+
+        return alerts
+
+    def start_sniffing(self, interface):
+        print("Iniciando análise de tráfego...")
+        sniff(iface=interface, prn=self.packet_callback, store=0)
+        print("Análise de tráfego encerrada.")
 
     def stop_sniffing(self):
+        print("Parando análise de tráfego...")
         self.running = False
-        if self.sniffing_thread:
-            self.sniffing_thread.join()
-
-    def start_dynamic_sniffing(self, interface, filter_rule):
-        self.sniffing_thread = threading.Thread(target=self.start_sniffing, args=(interface, filter_rule))
-        self.sniffing_thread.start()
-
-        # Agendar a parada após 1 minuto e reiniciar o monitoramento
-        threading.Timer(60, self.restart_sniffing, args=(interface, filter_rule)).start()
-
-    def restart_sniffing(self, interface, filter_rule):
-        self.stop_sniffing()
-        self.attack_count = 0
-        self.all_attackers = set()
-        self.highlighted_attackers = set()
-        self.start_dynamic_sniffing(interface, filter_rule)
-
-    def get_all_attackers(self):
-        return list(self.all_attackers)
-
-    def get_highlighted_attackers(self):
-        return list(self.highlighted_attackers)
 
 # Substitua "enp0s3" pelo nome da sua interface de rede
 interface = "enp0s3"
 
-# Substitua "host 192.168.1.1" pelo seu próprio endereço IP ou pela máscara de rede desejada
-filter_rule = "host 131.72.61.69"
+# Criar instância do analisador de tráfego
+analyzer = TrafficAnalyzer()
 
-# Criar instância do analisador
-analyzer = DDoSAnalyzer()
+# Iniciar a captura de pacotes em uma thread separada
+sniff_thread = threading.Thread(target=analyzer.start_sniffing, args=(interface,))
+sniff_thread.start()
 
-# Iniciar a captura de pacotes dinamicamente
-analyzer.start_dynamic_sniffing(interface, filter_rule)
+try:
+    while analyzer.running:
+        # Executar verificações e imprimir mensagens
+        analyzer.calculate_traffic_stats()
+        alerts = analyzer.check_for_alerts()
 
-# Aguardar até que a thread termine (isso ocorrerá após 1 minuto)
-time.sleep(61)
+        if not alerts:
+            analyzer.trafego_normal = 1
+            analyzer.alteracoes_identificadas = 0
+            print("Tráfego normal.")
+        else:
+            analyzer.trafego_normal = 0
+            analyzer.alteracoes_identificadas = 1
+            print(f"Alterações no tráfego identificadas. IPs com tráfego elevado: {', '.join(alerts)}")
 
-# Obter resultados
-all_attackers = analyzer.get_all_attackers()
-highlighted_attackers = analyzer.get_highlighted_attackers()
-total_packets = analyzer.attack_count
+        # Aguardar antes de realizar a próxima verificação
+        time.sleep(60)
 
-# Imprimir resultados
-print(f"Total de pacotes recebidos: {total_packets}")
-print(f"Todos os IPs atacantes: {', '.join(all_attackers)}")
-print(f"IPs destacados (mais de {analyzer.threshold} pacotes em {analyzer.time_window} segundos): {', '.join(highlighted_attackers)}")
+except KeyboardInterrupt:
+    # Se o usuário pressionar Ctrl+C, interromper o script
+    pass
+
+finally:
+    # Parar a captura de pacotes e esperar que a thread termine
+    analyzer.stop_sniffing()
+    sniff_thread.join()
