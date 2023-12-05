@@ -26,13 +26,13 @@ class TrafficAnalyzer:
 
     def obter_id_agencia_empresa(self):
         print("Digite as informações da Agência e Empresa:")
-        
+
         # Obter Agência
         while True:
             try:
                 agencia_input = input("Digite o número da Agência desejada (por exemplo, 121-1 ou 121-2): ")
                 agencia_numero = int(agencia_input.split('-')[1])
-                
+
                 if agencia_numero in (1, 2):
                     self.agencia_id = agencia_numero
                     break
@@ -79,22 +79,34 @@ class TrafficAnalyzer:
     def insert_network_data(self, ip, timestamp):
         ping = self.obter_ping_rede()
         try:
-            cursor_sql_server.execute(
-                "INSERT INTO rede (IP, data_hora, ping, pacotesEnviados, pacotesRecebidos, fk__ATMAgencia, fk__AgenciaEmpresa) "
-                "VALUES (%s, %s, %s, 1, 1, %s, %s)",
-                (ip, timestamp, ping, self.agencia_id, self.empresa_id)
-            )
+            # Verificar se já existe um registro para o IP na tabela
+            cursor_sql_server.execute("SELECT * FROM rede WHERE IP = %s", (ip,))
+            existing_record = cursor_sql_server.fetchone()
+
+            if existing_record:
+                # Atualizar o número de pacotes enviados
+                cursor_sql_server.execute(
+                    "UPDATE rede SET pacotesEnviados = pacotesEnviados + 1 WHERE IP = %s", (ip,)
+                )
+            else:
+                # Inserir um novo registro
+                cursor_sql_server.execute(
+                    "INSERT INTO rede (IP, data_hora, ping, pacotesEnviados, pacotesRecebidos, fk__ATMAgencia, fk__AgenciaEmpresa) "
+                    "VALUES (%s, %s, %s, 1, 1, %s, %s)",
+                    (ip, timestamp, ping, self.agencia_id, self.empresa_id)
+                )
+
             sql_server_cnx.commit()
 
         except pymssql.Error as e:
-            print(f"Erro ao inserir dados na tabela rede: {e}")
+            print(f"Erro ao inserir/atualizar dados na tabela rede: {e}")
 
     def insert_ddos_alert(self, ip, packet_count):
         try:
             cursor_sql_server.execute(
                 "INSERT INTO DDoS (IPAtq, qtdPacotesAtq, fkRede) "
-                "VALUES (%s, %s, (SELECT MAX(idRede) FROM rede))",
-                (ip, packet_count)
+                "VALUES (%s, %s, (SELECT MAX(idRede) FROM rede WHERE IP = %s))",
+                (ip, packet_count, ip)
             )
             sql_server_cnx.commit()
 
